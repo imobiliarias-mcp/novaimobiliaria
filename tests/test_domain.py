@@ -111,6 +111,47 @@ def test_listing_collection_operations() -> None:
     assert not meta.has_next_page
 
 
+def test_listing_collection_serializes_items_and_pagination() -> None:
+    """Serialize every typed listing field and preserve pagination metadata."""
+    listing = ListingSummary(
+        identity=ListingIdentity("uuid-123", "ref-123"),
+        title="Apartamento Teste",
+        pricing=ListingPricing("R$ 1.000,00", "R$ 1.000,00"),
+        address_formatted="Centro, Timóteo",
+        rooms_summary="2 quartos",
+        primary_area="60 m²",
+        thumbnail_url="https://images.example/thumb.jpg",
+        canonical_path="imovel/123",
+        url="https://jnovaimobiliaria.com.br/imovel/123",
+    )
+    meta = PaginationMeta(total=6, per_page=2, current_page=2, total_pages=3)
+    collection = ListingCollection(items=[listing, listing], meta=meta)
+
+    serialized = collection.to_dictionary()
+
+    assert len(serialized["items"]) == 2
+    assert serialized["items"][0]["url"] == listing.url
+    assert serialized["items"][0]["canonical_path"] == listing.canonical_path
+    assert serialized["items"][0]["identity"]["property_id"] == "uuid-123"
+    assert serialized["items"][0]["pricing"]["total_price"] == "R$ 1.000,00"
+    assert serialized["returned_count"] == 2
+    assert serialized["meta"] == {
+        "total": 6,
+        "per_page": 2,
+        "current_page": 2,
+        "total_pages": 3,
+    }
+
+
+def test_empty_listing_collection_serializes_zero_count() -> None:
+    """Serialize zero results while retaining the absent pagination metadata."""
+    serialized = ListingCollection().to_dictionary()
+
+    assert serialized["items"] == []
+    assert serialized["returned_count"] == 0
+    assert serialized["meta"] is None
+
+
 def test_photo_gallery_operations() -> None:
     """Test PhotoGallery collection methods."""
     photo1 = Photo("p1", "http://example.com/large1.jpg", "http://example.com/med1.jpg")

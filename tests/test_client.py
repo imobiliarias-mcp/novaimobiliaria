@@ -3,6 +3,7 @@
 import pytest
 from nova_research.client import NovaRentalClient
 from nova_research.collaborators import RentalNetworkGateway, RentalParserSuite
+from nova_research.parsers.search_parser import SearchPageParser
 from nova_research.domain.criteria import SearchCriteria
 from nova_research.infrastructure.http_client import (
     HttpClientProtocol,
@@ -19,9 +20,11 @@ class StubHttpClient(HttpClientProtocol):
     def __init__(self, responses: dict[str, HttpResponse]) -> None:
         """Initialize with response map keyed by URL substring."""
         self._responses = responses
+        self.calls: list[str] = []
 
     def get(self, url: str, params: dict[str, str] | None = None) -> HttpResponse:
         """Return matching stub response or 404."""
+        self.calls.append(url)
         for key, resp in self._responses.items():
             if key in url:
                 if resp.status_code == 404:
@@ -36,7 +39,7 @@ def test_client_search_with_stub() -> None:
     """Test client search method with stub response."""
     stub_payload = {
         "meta": {"pagination": {"total": 1, "per_page": 21, "current_page": 1, "total_pages": 1}},
-        "data": [{"id": "1", "reference": "100", "title_formatted": "Casa", "price": "R$1.000,00"}],
+        "data": [{"id": "1", "reference": "100", "title_formatted": "Casa", "price": "R$1.000,00", "url": "/imovel/100"}],
     }
     client_stub = StubHttpClient({"properties": HttpResponse(200, "", stub_payload, "http://api/properties")})
     gateway = RentalNetworkGateway(http_client=client_stub)
@@ -47,11 +50,33 @@ def test_client_search_with_stub() -> None:
     assert result[0].identity.reference == "100"
 
 
+def test_client_uses_configured_public_url_without_detail_lookup() -> None:
+    """Resolve a search card URL through the actual client parser pipeline."""
+    payload = {
+        "data": [{"id": "uuid-608", "reference": "608", "url": "/imovel/608"}]
+    }
+    transport = StubHttpClient(
+        {"properties": HttpResponse(200, "", payload, "https://api.example/properties")}
+    )
+    parsers = RentalParserSuite(
+        search_parser=SearchPageParser(public_base_url="https://public.example/")
+    )
+    client = NovaRentalClient(
+        gateway=RentalNetworkGateway(http_client=transport), parsers=parsers
+    )
+
+    result = client.search(SearchCriteria())
+
+    assert result[0].url == "https://public.example/imovel/608"
+    assert len(transport.calls) == 1
+    assert transport.calls[0].endswith("/api/properties")
+
+
 def test_client_search_rentals_convenience() -> None:
     """Test client search_rentals helper."""
     stub_payload = {
         "meta": {"pagination": {"total": 1, "per_page": 21, "current_page": 1, "total_pages": 1}},
-        "data": [{"id": "2", "reference": "200", "title_formatted": "Apto", "price": "R$2.000,00"}],
+        "data": [{"id": "2", "reference": "200", "title_formatted": "Apto", "price": "R$2.000,00", "url": "/imovel/200"}],
     }
     client_stub = StubHttpClient({"properties": HttpResponse(200, "", stub_payload, "http://api/properties")})
     gateway = RentalNetworkGateway(http_client=client_stub)

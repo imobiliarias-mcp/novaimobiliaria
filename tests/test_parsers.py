@@ -1,8 +1,104 @@
 """Unit tests for SearchPageParser, PropertyDetailParser, and MetadataParser."""
 
+import pytest
+
+from nova_research.domain.listing import InvalidListingUrlError
 from nova_research.parsers.detail_parser import PropertyDetailParser
 from nova_research.parsers.metadata_parser import MetadataParser
 from nova_research.parsers.search_parser import SearchPageParser
+
+
+def _listing_payload(public_path: str) -> dict:
+    """Build one minimal search result with the supplied card URL."""
+    return {
+        "data": [{"id": "item-id-608", "reference": "608", "url": public_path}]
+    }
+
+
+@pytest.mark.parametrize(
+    ("card_url", "expected_url"),
+    [
+        (
+            "https://jnovaimobiliaria.com.br/imovel/absolute/608",
+            "https://jnovaimobiliaria.com.br/imovel/absolute/608",
+        ),
+        ("/imovel/relative/608", "https://jnovaimobiliaria.com.br/imovel/relative/608"),
+        (
+            "//jnovaimobiliaria.com.br/imovel/protocol-relative/608",
+            "https://jnovaimobiliaria.com.br/imovel/protocol-relative/608",
+        ),
+        ("?id=608", "https://jnovaimobiliaria.com.br/?id=608"),
+    ],
+)
+def test_search_parser_resolves_public_card_urls(card_url: str, expected_url: str) -> None:
+    """Resolve public URLs while retaining the source canonical path."""
+    listing = SearchPageParser().parse(_listing_payload(card_url))[0]
+
+    assert listing.url == expected_url
+    assert listing.canonical_path == card_url
+
+
+def test_search_parser_rejects_documented_api_url_with_identity() -> None:
+    """Reject an API endpoint as a property page with the listing ID in context."""
+    payload = {
+        "data": [
+            {
+                "id": "uuid-1",
+                "url": "https://api-sites.tecimob.com.br/api/properties/uuid-1",
+            }
+        ]
+    }
+
+    with pytest.raises(InvalidListingUrlError, match="uuid-1"):
+        SearchPageParser().parse(payload)
+
+
+def test_search_parser_uses_injected_public_base_url() -> None:
+    """Resolve relative card links using the configured public site origin."""
+    parser = SearchPageParser(public_base_url="https://public.example/")
+
+    listing = parser.parse(_listing_payload("/imovel/configured/608"))[0]
+
+    assert listing.url == "https://public.example/imovel/configured/608"
+
+
+@pytest.mark.parametrize("card_url", ["javascript:alert(1)", ""])
+def test_search_parser_rejects_unrecoverable_public_url(card_url: str) -> None:
+    """Reject invalid or absent URLs with property identity in the error."""
+    with pytest.raises(InvalidListingUrlError, match="item-id-608"):
+        SearchPageParser().parse(_listing_payload(card_url))
+
+
+@pytest.mark.parametrize(
+    "card_url",
+    [
+        "https://bad host.example/imovel/listing/608",
+        "https://user:password@jnovaimobiliaria.com.br/imovel/listing/608",
+        "https://jnovaimobiliaria.com.br:invalid/imovel/listing/608",
+        "https://[invalid]/imovel/listing/608",
+        "https://api-sites.tecimob.com.br/api/properties/uuid-1",
+        "https://imagens.tecimob.com.br/property-photo.jpg",
+        "https://jnovaimobiliaria.com.br/alugar/imoveis/timoteo-mg?offset=1",
+    ],
+)
+def test_search_parser_rejects_invalid_public_property_urls(card_url: str) -> None:
+    """Reject malformed authorities and non-property endpoint URLs."""
+    with pytest.raises(InvalidListingUrlError, match="item-id-608"):
+        SearchPageParser().parse(_listing_payload(card_url))
+
+
+@pytest.mark.parametrize(
+    "public_base_url",
+    [
+        "https://bad host.example/",
+        "https://user:password@public.example/",
+        "https://public.example:invalid/",
+    ],
+)
+def test_search_parser_rejects_malformed_public_base(public_base_url: str) -> None:
+    """Reject malformed origin configuration before parsing listings."""
+    with pytest.raises(ValueError, match="public base URL"):
+        SearchPageParser(public_base_url=public_base_url)
 
 
 def test_search_page_parser_with_payload() -> None:
@@ -59,6 +155,7 @@ def test_search_page_parser_with_payload() -> None:
     assert item.primary_area == "81 m²"
     assert item.thumbnail_url == "https://img.tecimob/med.jpg"
     assert item.canonical_path == "sala-comercial-559"
+    assert item.url == "https://jnovaimobiliaria.com.br/sala-comercial-559"
 
 
 def test_property_detail_parser() -> None:

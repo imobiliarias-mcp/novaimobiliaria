@@ -154,7 +154,10 @@ When `custom_query=card` is supplied, each item in the `data` array represents a
 | `rooms_summary` | Join `item.rooms.*.title_formated` | `1 Cozinha, 1 Lavabo` |
 | `primary_area` | `item.areas.primary_area.value` + `measure` | `81 m²` |
 | `thumbnail_url` | `item.images_extra[0].file_url.medium` | `https://imagens.tecimob.com.br/.../webp` |
-| `canonical_url` | `item.url` | `sala-comercial-para-alugar-no-bairro-centro.../559` |
+| `canonical_path` | `item.url` | `sala-comercial-para-alugar-no-bairro-centro.../559` |
+| `url` | `item.url` resolved against the public website origin | `https://jnovaimobiliaria.com.br/sala-comercial.../559` |
+
+`canonical_path` preserves the value returned by the API. Search parsers and `ListingSummary.to_dictionary()` expose `url` as an absolute HTTP(S) public property page, resolving relative and protocol-relative card values against `https://jnovaimobiliaria.com.br/`. API-host links, image files, the documented `/alugar/imoveis/` search route, malformed authorities, and missing links raise a listing-specific validation error. `ListingCollection.to_dictionary()` retains all pagination metadata and the returned count.
 
 ---
 
@@ -249,6 +252,10 @@ rentals = client.search_rentals(
 print(f"Total matching: {rentals.meta.total}")
 for listing in rentals:
     print(listing.identity.reference, listing.title, listing.pricing.amount)
+    print("Link:", listing.url)
+
+# The typed collection also exposes a serializable representation.
+search_output = rentals.to_dictionary()
 
 # 2. Retrieve property details
 detail = client.get_details("559")

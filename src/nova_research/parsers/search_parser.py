@@ -1,7 +1,10 @@
 """Parser for transforming search JSON responses into domain collections."""
 
 from typing import Any
+from urllib.parse import urljoin
 from nova_research.domain.listing import (
+    InvalidListingUrlError,
+    is_valid_public_listing_url,
     ListingCollection,
     ListingIdentity,
     ListingPricing,
@@ -10,8 +13,15 @@ from nova_research.domain.listing import (
 )
 
 
+PUBLIC_BASE_URL = "https://jnovaimobiliaria.com.br/"
+
+
 class SearchPageParser:
     """Parses JSON responses from Tecimob property search endpoint."""
+
+    def __init__(self, public_base_url: str = PUBLIC_BASE_URL) -> None:
+        """Configure the distinct public-site origin for listing URLs."""
+        self._public_base_url = self._validate_public_base_url(public_base_url)
 
     def parse(self, payload: dict[str, Any]) -> ListingCollection:
         """Parse raw API dictionary payload into domain ListingCollection."""
@@ -34,17 +44,45 @@ class SearchPageParser:
 
     def _parse_item(self, item: dict[str, Any]) -> ListingSummary:
         """Map raw property card dictionary to domain ListingSummary."""
+        identity = self._extract_identity(item)
+        canonical_path = str(item.get("url") or "")
+        public_url = self._resolve_public_url(canonical_path, identity.property_id)
         title = str(item.get("title_formatted") or item.get("title") or "Imóvel")
         return ListingSummary(
-            identity=self._extract_identity(item),
+            identity=identity,
             title=title,
             pricing=self._extract_pricing(item),
             address_formatted=self._extract_address(item),
             rooms_summary=self._extract_rooms_summary(item),
             primary_area=self._extract_primary_area(item),
             thumbnail_url=self._extract_thumbnail(item),
-            canonical_path=str(item.get("url", "")),
+            canonical_path=canonical_path,
+            url=public_url,
         )
+
+    def _resolve_public_url(self, canonical_path: str, property_id: str) -> str:
+        """Resolve and validate a card URL without relying on its API origin."""
+        if not canonical_path.strip():
+            raise InvalidListingUrlError(
+                f"Listing {property_id} has no recoverable public URL."
+            )
+        try:
+            public_url = urljoin(self._public_base_url, canonical_path)
+        except ValueError as error:
+            raise InvalidListingUrlError(
+                f"Listing {property_id} has invalid public URL {canonical_path!r}."
+            ) from error
+        if not is_valid_public_listing_url(public_url):
+            raise InvalidListingUrlError(
+                f"Listing {property_id} has invalid public URL {canonical_path!r}."
+            )
+        return public_url
+
+    def _validate_public_base_url(self, public_base_url: str) -> str:
+        """Reject an invalid public origin before parsing listings."""
+        if not is_valid_public_listing_url(public_base_url):
+            raise ValueError(f"Invalid public base URL: {public_base_url!r}.")
+        return f"{public_base_url.rstrip('/')}/"
 
     def _extract_identity(self, item: dict[str, Any]) -> ListingIdentity:
         """Extract identity value object."""

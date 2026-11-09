@@ -50,11 +50,12 @@ class NovaMcpAdapter:
         loc = getattr(item, "location", None)
         specs = getattr(item, "specs", None)
         return {
-            "id": getattr(item, "property_id", ""),
-            "code": getattr(item, "code", ""),
+            "id": _identity_value(item, "property_id"),
+            "code": _identity_value(item, "reference") or _identity_value(item, "property_id"),
             "title": getattr(item, "title", ""),
             "price": getattr(item, "price_formatted", ""),
             "url": getattr(item, "url", ""),
+            "media_url": getattr(item, "thumbnail_url", None) or "",
             "neighborhood": getattr(loc, "neighborhood", "") if loc else "",
             "city": getattr(loc, "city", "") if loc else "",
             "bedrooms": getattr(specs, "bedrooms", 0) if specs else 0,
@@ -67,8 +68,8 @@ class NovaMcpAdapter:
         loc = getattr(detail, "location", None)
         specs = getattr(detail, "specs", None)
         return {
-            "id": getattr(detail, "property_id", str(property_code)),
-            "code": getattr(detail, "code", ""),
+            "id": _identity_value(detail, "property_id") or str(property_code),
+            "code": _identity_value(detail, "reference") or _identity_value(detail, "property_id"),
             "title": getattr(detail, "title", ""),
             "description": getattr(detail, "description", ""),
             "price": getattr(detail, "price_formatted", ""),
@@ -79,7 +80,7 @@ class NovaMcpAdapter:
             "bathrooms": getattr(specs, "bathrooms", 0) if specs else 0,
             "parking_spaces": getattr(specs, "parking_spaces", 0) if specs else 0,
             "area": getattr(specs, "area", 0.0) if specs else 0.0,
-            "photos": list(getattr(detail, "gallery", [])),
+            "photos": _gallery_urls(detail),
         }
 
     def get_facets(self) -> dict[str, Any]:
@@ -95,3 +96,19 @@ class NovaMcpAdapter:
             "coverage_region": "Timóteo, Coronel Fabriciano, Ipatinga",
             "supported_operations": ["search_rentals", "get_property_detail", "get_facets"],
         }
+
+
+def _identity_value(entity: Any, name: str) -> str:
+    """Read an identifier from the entity's identity block, falling back to a flat attribute."""
+    identity = getattr(entity, "identity", None)
+    source = identity if identity is not None else entity
+    return str(getattr(source, name, "") or "")
+
+
+def _gallery_urls(detail: Any) -> list[str]:
+    """Return one URL per photo, preferring the large variant and skipping photos without any URL."""
+    gallery = getattr(detail, "gallery", None)
+    photos = getattr(gallery, "photos", []) if gallery is not None else []
+    urls = (photo.large_url or photo.medium_url for photo in photos)
+    return [url for url in urls if url]
+

@@ -72,3 +72,62 @@ def test_mcp_adapter_property_detail():
     detail = adapter.get_property_detail("555")
     assert isinstance(detail, dict)
     assert detail["title"] == "Apto Nova Timóteo"
+
+
+class _Identity:
+    def __init__(self, property_id: str, reference: str) -> None:
+        self.property_id = property_id
+        self.reference = reference
+
+
+class _RealShapedClient:
+    """Mirrors the domain objects the parsers really return: identity lives under .identity."""
+
+    def search_rentals(self, **kwargs):
+        class Summary:
+            identity = _Identity("555", "NV01")
+            title = "Apto Nova Timóteo"
+            thumbnail_url = "https://cdn.test/nova-thumb.jpg"
+
+            class pricing:
+                amount = "R$ 1.300"
+
+            url = "https://www.novaimobiliaria.com/imovel/555"
+
+        return [Summary()]
+
+    def get_details(self, ref):
+        class Photo:
+            large_url = "https://cdn.test/nova-large.jpg"
+            medium_url = "https://cdn.test/nova-medium.jpg"
+
+        class Photo2:
+            large_url = ""
+            medium_url = "https://cdn.test/nova-medium-only.jpg"
+
+        class Gallery:
+            photos = [Photo(), Photo2()]
+
+        class Detail:
+            identity = _Identity("555", "NV01")
+            title = "Apto Nova Timóteo"
+            description = "<p>Sol da manhã</p>"
+            gallery = Gallery()
+            url = "https://www.novaimobiliaria.com/imovel/555"
+
+        return Detail()
+
+
+def test_search_items_carry_identifiers_and_thumbnail_from_identity():
+    adapter = NovaMcpAdapter(client=_RealShapedClient())
+    item = adapter.search_rentals()["listings"][0]
+    assert item["code"] == "NV01"
+    assert item["id"] == "555"
+    assert item["media_url"] == "https://cdn.test/nova-thumb.jpg"
+
+
+def test_detail_photos_are_urls_not_objects():
+    adapter = NovaMcpAdapter(client=_RealShapedClient())
+    detail = adapter.get_property_detail("NV01")
+    assert detail["photos"] == ["https://cdn.test/nova-large.jpg", "https://cdn.test/nova-medium-only.jpg"]
+    assert detail["code"] == "NV01"
